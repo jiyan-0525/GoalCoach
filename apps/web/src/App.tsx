@@ -7,7 +7,8 @@ import { RoadmapView } from './components/RoadmapView.tsx';
 import { RetentionVisualizer } from './components/RetentionVisualizer.tsx';
 import { LearnerProfileDrawer } from './components/LearnerProfileDrawer.tsx';
 import { TeachingAgentModal } from './components/TeachingAgentModal.tsx';
-import { LearnerState, NextAction, CurriculumConcept, GradingResult, LearningGoal, LearningLoopResponse, TeachingAction, ProgressSummary, StudyEntrySource } from './types.ts';
+import { AuthScreen } from './components/AuthScreen.tsx';
+import { LearnerState, NextAction, CurriculumConcept, GradingResult, LearningGoal, LearningLoopResponse, TeachingAction, ProgressSummary, StudyEntrySource, AuthResponse, AuthUser } from './types.ts';
 
 interface LessonSelection {
   entrySource: StudyEntrySource;
@@ -15,8 +16,43 @@ interface LessonSelection {
   planItemId?: string;
 }
 
+const LEARNER_ID_STORAGE_KEY = 'goalcoach.learner_id';
+const AUTH_TOKEN_STORAGE_KEY = 'goalcoach.auth_token';
+
+function generateLearnerId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `learner_${crypto.randomUUID()}`;
+  }
+  return `learner_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+}
+
+function getOrCreateLearnerId(): string {
+  if (typeof window === 'undefined') return generateLearnerId();
+  try {
+    const existing = window.localStorage.getItem(LEARNER_ID_STORAGE_KEY);
+    if (existing && existing.trim()) return existing;
+    const created = generateLearnerId();
+    window.localStorage.setItem(LEARNER_ID_STORAGE_KEY, created);
+    return created;
+  } catch {
+    return generateLearnerId();
+  }
+}
+
+function getStoredAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function App() {
-  const [learnerId] = useState('learner_001');
+  const [learnerId, setLearnerId] = useState(getOrCreateLearnerId);
+  const [authToken, setAuthToken] = useState<string | null>(getStoredAuthToken);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [learnerState, setLearnerState] = useState<LearnerState | null>(null);
   const [goalCompletion, setGoalCompletion] = useState(0.0);
   const [learnedProgress, setLearnedProgress] = useState(0.0);
@@ -59,6 +95,7 @@ export function App() {
     if (!learnerState?.goal) return null;
     return learnerState.goal;
   })();
+  const profileDisplayName = authUser?.display_name?.trim() || learnerState?.displayName || 'Learner';
 
   const parseApiError = async (response: Response, fallback: string): Promise<string> => {
     try {
@@ -73,6 +110,55 @@ export function App() {
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
   const apiUrl = (path: string): string => `${API_BASE}${path}`;
+  const authHeaders = (): HeadersInit => (
+    authToken
+      ? { Authorization: `Bearer ${authToken}` }
+      : {}
+  );
+
+  const onAuthenticated = (response: AuthResponse): void => {
+    setAuthToken(response.access_token);
+    setAuthUser(response.user);
+    setLearnerId(response.user.learner_id);
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, response.access_token);
+    window.localStorage.setItem(LEARNER_ID_STORAGE_KEY, response.user.learner_id);
+  };
+
+  const onSignOut = (): void => {
+    setAuthToken(null);
+    setAuthUser(null);
+    const fallbackLearnerId = getOrCreateLearnerId();
+    setLearnerId(fallbackLearnerId);
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  };
+
+  useEffect(() => {
+    const resolveAuth = async () => {
+      if (!authToken) {
+        setAuthReady(true);
+        return;
+      }
+      try {
+        const response = await fetch(apiUrl('/api/v1/auth/me'), {
+          headers: authHeaders(),
+        });
+        if (!response.ok) {
+          onSignOut();
+          setAuthReady(true);
+          return;
+        }
+        const user = await response.json() as AuthUser;
+        setAuthUser(user);
+        setLearnerId(user.learner_id);
+        window.localStorage.setItem(LEARNER_ID_STORAGE_KEY, user.learner_id);
+      } catch {
+        onSignOut();
+      } finally {
+        setAuthReady(true);
+      }
+    };
+    void resolveAuth();
+  }, [authToken]);
 
   const dispatchLearningEvent = async (
     eventType: LearningLoopResponse['eventType'],
@@ -81,7 +167,7 @@ export function App() {
   ): Promise<LearningLoopResponse> => {
     const response = await fetch(apiUrl('/api/v1/events'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ event_type: eventType, learner_id: learnerId, payload }),
     });
     if (response.status === 409) {
@@ -102,7 +188,9 @@ export function App() {
   };
 
   const refreshAuthoritativeState = async (): Promise<void> => {
-    const response = await fetch(apiUrl(`/api/v1/learners/${learnerId}`));
+    const response = await fetch(apiUrl(`/api/v1/learners/${learnerId}`), {
+      headers: authHeaders(),
+    });
     if (!response.ok) return;
     const body = await response.json() as {
       state?: LearnerState;
@@ -116,7 +204,9 @@ export function App() {
 
   const refreshRoadmap = async (): Promise<void> => {
     const requestId = ++roadmapRequestId.current;
-    const learnerResponse = await fetch(apiUrl(`/api/v1/learners/${learnerId}`));
+    const learnerResponse = await fetch(apiUrl(`/api/v1/learners/${learnerId}`), {
+      headers: authHeaders(),
+    });
     if (!learnerResponse.ok) {
       throw new Error(await parseApiError(learnerResponse, 'The roadmap could not be loaded.'));
     }
@@ -127,7 +217,9 @@ export function App() {
     if (!learnerBody.state) {
       throw new Error('The roadmap could not be loaded.');
     }
-    const response = await fetch(apiUrl(`/api/v1/learners/${learnerId}/roadmap`));
+    const response = await fetch(apiUrl(`/api/v1/learners/${learnerId}/roadmap`), {
+      headers: authHeaders(),
+    });
     if (!response.ok) throw new Error(await parseApiError(response, 'The roadmap could not be loaded.'));
     const body = await response.json() as {
       roadmap?: CurriculumConcept[];
@@ -157,7 +249,9 @@ export function App() {
     data: LearningLoopResponse,
   ): Promise<void> => {
     if (!data.state) return;
-    const response = await fetch(apiUrl(`/api/v1/learners/${learnerId}/roadmap`));
+    const response = await fetch(apiUrl(`/api/v1/learners/${learnerId}/roadmap`), {
+      headers: authHeaders(),
+    });
     if (!response.ok) return;
     const body = await response.json() as {
       roadmap?: CurriculumConcept[];
@@ -193,9 +287,15 @@ export function App() {
 
   // Fetch initial learner state and curriculum
   useEffect(() => {
+    if (!authReady || !authToken) {
+      return;
+    }
     async function init() {
+      setLoading(true);
       try {
-        const res = await fetch(apiUrl(`/api/v1/learners/${learnerId}`));
+        const res = await fetch(apiUrl(`/api/v1/learners/${learnerId}`), {
+          headers: authHeaders(),
+        });
         if (res.ok) {
           const data = await res.json();
           setNextAction(data.nextAction);
@@ -210,12 +310,23 @@ export function App() {
       }
     }
     init();
-  }, [learnerId]);
+  }, [authReady, authToken, learnerId]);
 
   // Replanning is an explicit backend event, never a read-only plan fetch.
   const handleRegeneratePlan = async (): Promise<void> => {
     setAppError(null);
     try {
+      if (!learnerState?.goal) {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const data = await dispatchLearningEvent('GOAL_CREATED', {
+          title: 'HSK 1 Goal',
+          target_hsk_level: 1,
+          daily_available_minutes: 20,
+          timezone,
+        });
+        await acceptResponse(data, true);
+        return;
+      }
       const data = await dispatchLearningEvent('REPLAN_REQUESTED', {
         reason: 'Learner requested a refreshed daily plan.',
       });
@@ -414,6 +525,18 @@ export function App() {
     }
   };
 
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 select-none">
+        <p className="text-sm font-bold text-zinc-600">Checking your account...</p>
+      </div>
+    );
+  }
+
+  if (!authToken || !authUser) {
+    return <AuthScreen onAuthenticated={onAuthenticated} />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 select-none">
@@ -448,6 +571,10 @@ export function App() {
 
         {/* Main Content View */}
         <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-8 py-7 sm:py-10">
+          <div className="mb-4 flex items-center justify-end gap-3">
+            <span className="text-xs font-bold text-slate-500">{authUser.email}</span>
+            <button type="button" onClick={onSignOut} className="secondary-action">Sign out</button>
+          </div>
           {appError && (
             <p role="alert" className="mb-5 rounded-2xl bg-rose-50 p-4 text-sm font-bold text-rose-800">
               {appError}
@@ -498,7 +625,7 @@ export function App() {
       <LearnerProfileDrawer
         isOpen={isProfileDrawerOpen}
         onClose={() => setIsProfileDrawerOpen(false)}
-        displayName={learnerState?.displayName || 'Ann'}
+        displayName={profileDisplayName}
         goal={goalForDisplay}
         learnedProgress={learnedProgress}
         masteredProgress={masteredProgress}

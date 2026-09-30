@@ -42,5 +42,20 @@ class LearningEventORM(LearnerBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class UserAccountORM(LearnerBase):
+    """Account record linked to one learner aggregate."""
+
+    __tablename__ = "user_accounts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    learner_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 # Backwards compatibility alias
 LearnerStateRecord = LearnerStateORM

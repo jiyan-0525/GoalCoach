@@ -12,12 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from apps.api.dependencies import (
+    get_current_user_optional,
     get_content_repo,
     get_grader_component,
     get_learner_repo,
     get_planning_worker,
     get_teaching_worker,
 )
+from goalcoach.infrastructure.config import Settings
 from goalcoach.agents.grader_component import GraderComponent
 from goalcoach.agents.planning_agent import PlanningWorker
 from goalcoach.agents.teaching_agent import TeachingWorker
@@ -41,6 +43,7 @@ from goalcoach.infrastructure.persistence.repositories import (
     ContentRepository,
     SqliteLearnerRepository,
     StaleLearnerStateError,
+    UserAccount,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,7 @@ class EventRequest(BaseModel):
     """Inbound request payload for the unified event dispatcher."""
 
     event_type: EventType
-    learner_id: UUID | str = Field(default="learner_001")
+    learner_id: UUID | str | None = Field(default=None)
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -106,6 +109,7 @@ def validate_curriculum_references(
 @router.post("/events", response_model=OrchestratorResponse)
 async def dispatch_learning_event(
     req: EventRequest,
+    current_user: UserAccount | None = Depends(get_current_user_optional),
     learner_repo: SqliteLearnerRepository = Depends(get_learner_repo),
     content_repo: ContentRepository = Depends(get_content_repo),
     planning_worker: PlanningWorker = Depends(get_planning_worker),
@@ -124,6 +128,16 @@ async def dispatch_learning_event(
         grader_worker=grader_worker,
     )
 
+    settings = Settings()
+    if current_user is not None:
+        resolved_learner_id: UUID | str = current_user.learner_id
+        if req.learner_id is not None and str(req.learner_id) != current_user.learner_id:
+            raise HTTPException(status_code=403, detail="You can only submit events for your account")
+    else:
+        if settings.auth_require_token:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        resolved_learner_id = req.learner_id or "learner_001"
+
     payload = validate_event_payload(req.event_type, req.payload)
     validate_curriculum_references(req.event_type, payload, content_repo)
 
@@ -131,7 +145,7 @@ async def dispatch_learning_event(
         return await orchestrator.handle_event(
             event_type=req.event_type,
             payload=payload,
-            learner_id=req.learner_id,
+            learner_id=resolved_learner_id,
         )
     except SessionLifecycleError as exc:
         raise HTTPException(
