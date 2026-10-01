@@ -393,7 +393,22 @@ class DeterministicOrchestrator:
                     None,
                 )
                 if active_item is None:
-                    raise SessionLifecycleError("The selected Daily Plan item does not exist")
+                    logger.info(
+                        "Requested plan item %s not found in plan; falling back to requested concept or first uncompleted",
+                        requested_plan_item_id,
+                    )
+                    if requested_concept_id:
+                        active_item = next(
+                            (
+                                item
+                                for item in plan.items
+                                if item.concept_id == str(requested_concept_id)
+                                and not item.completed
+                            ),
+                            None,
+                        )
+                    if active_item is None:
+                        active_item = first_uncompleted
             else:
                 active_item = first_uncompleted
             if active_item is None:

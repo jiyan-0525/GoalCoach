@@ -11,13 +11,10 @@ interface TeachingAgentModalProps {
   gradingResult: GradingResult | null;
   replanned: boolean;
   nextAction?: NextAction;
-  hasMorePlannedLessons?: boolean;
   recoveryLabel: string;
   onRecover: () => Promise<void>;
   onClose: () => Promise<void>;
   onContinue: () => Promise<void>;
-  onSkipToNextLesson?: () => Promise<void>;
-  onRetryExercise?: () => void;
   onRequestHelp: (query: string) => Promise<void>;
   onSubmitAnswer: (answer: string) => Promise<void>;
 }
@@ -52,13 +49,10 @@ export const TeachingAgentModal: React.FC<TeachingAgentModalProps> = ({
   gradingResult,
   replanned,
   nextAction,
-  hasMorePlannedLessons = false,
   recoveryLabel,
   onRecover,
   onClose,
   onContinue,
-  onSkipToNextLesson,
-  onRetryExercise,
   onRequestHelp,
   onSubmitAnswer,
 }) => {
@@ -318,52 +312,30 @@ export const TeachingAgentModal: React.FC<TeachingAgentModalProps> = ({
                   </p>
                 )}
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {gradingResult.passedGates ? (
-                    <button
-                      type="button"
-                      disabled={loading}
-                      onClick={() => void (nextAction === 'complete' ? onClose() : onContinue())}
-                      className="rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      {nextAction === 'complete' ? "Finish today's plan" : 'Continue to next lesson'}
-                    </button>
-                  ) : (
-                    <>
-                      {onRetryExercise && (
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => {
-                            setAnswer('');
-                            setSelectedLeft(null);
-                            setMatchedPairs({});
-                            onRetryExercise();
-                          }}
-                          className="rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-black text-white hover:bg-amber-700 disabled:opacity-50"
-                        >
-                          Try again
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={loading}
-                        onClick={() => void onContinue()}
-                        className="rounded-xl bg-zinc-950 px-4 py-2.5 text-xs font-black text-white hover:bg-zinc-800 disabled:opacity-50"
-                      >
-                        Try a new teaching approach
-                      </button>
-                      {hasMorePlannedLessons && onSkipToNextLesson && (
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => void onSkipToNextLesson()}
-                          className="rounded-xl border-2 border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-                        >
-                          Skip to next lesson
-                        </button>
-                      )}
-                    </>
-                  )}
+                  <button
+                    data-testid="continue-lesson-btn"
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setAnswer('');
+                      setSelectedLeft(null);
+                      setMatchedPairs({});
+                      if (gradingResult.passedGates && nextAction === 'complete') {
+                        void onClose();
+                      } else {
+                        void onContinue();
+                      }
+                    }}
+                    className={`rounded-xl px-5 py-2.5 text-xs font-black text-white transition-colors disabled:opacity-50 ${
+                      gradingResult.passedGates
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : 'bg-zinc-950 hover:bg-zinc-800'
+                    }`}
+                  >
+                    {gradingResult.passedGates
+                      ? (nextAction === 'complete' ? "Finish today's plan" : 'Continue to next lesson')
+                      : 'Continue with Coach'}
+                  </button>
                 </div>
               </div>
             )}

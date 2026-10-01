@@ -254,34 +254,6 @@ export function App() {
     }
   };
 
-  const uncompletedPlanItems = useMemo(() => {
-    return learnerState?.activePlan?.items.filter((item) => !item.completed) ?? [];
-  }, [learnerState?.activePlan?.items]);
-
-  const activePlanItemId = lastLessonSelection.current.planItemId || teachingAction?.metadata?.plan_item_id;
-
-  const nextUncompletedItem = useMemo(() => {
-    if (uncompletedPlanItems.length === 0) return null;
-    const nextItem = uncompletedPlanItems.find((item) => String(item.id) !== String(activePlanItemId));
-    return nextItem ?? (uncompletedPlanItems.length > 1 ? uncompletedPlanItems[0] : null);
-  }, [uncompletedPlanItems, activePlanItemId]);
-
-  const hasMorePlannedLessons = Boolean(nextUncompletedItem);
-
-  const handleSkipToNextLesson = async (): Promise<void> => {
-    if (!nextUncompletedItem) return;
-    await handleStartAgentSession({
-      entrySource: 'planned',
-      planItemId: String(nextUncompletedItem.id),
-      conceptId: nextUncompletedItem.conceptId,
-    });
-  };
-
-  const handleRetryExercise = (): void => {
-    setAgentGradingResult(null);
-    activityStartedAt.current = Date.now();
-  };
-
   const handleStartAgentSession = async (
     selection: LessonSelection = lastLessonSelection.current,
   ): Promise<void> => {
@@ -306,10 +278,18 @@ export function App() {
       // regenerated the plan, request the teaching turn only after it finishes.
       if (!data.teachingAction && data.nextAction === 'teach') {
         setLoadingStage('teaching');
+        const newPlan = data.dailyPlan ?? (data.state as LearnerState | undefined)?.activePlan;
+        const uncompletedItem = newPlan?.items.find((item) => !item.completed);
+        const nextSelection: LessonSelection = {
+          entrySource: selection.entrySource,
+          conceptId: uncompletedItem?.conceptId ?? selection.conceptId,
+          planItemId: uncompletedItem ? String(uncompletedItem.id) : undefined,
+        };
+        lastLessonSelection.current = nextSelection;
         data = await dispatchLearningEvent('SESSION_STARTED', {
-          entry_source: selection.entrySource,
-          concept_id: selection.conceptId,
-          plan_item_id: selection.planItemId,
+          entry_source: nextSelection.entrySource,
+          concept_id: nextSelection.conceptId,
+          plan_item_id: nextSelection.planItemId,
         });
         await acceptResponse(data);
       }
@@ -319,6 +299,13 @@ export function App() {
           return;
         }
         throw new Error('No teaching action was returned.');
+      }
+      if (data.teachingAction.metadata?.plan_item_id) {
+        lastLessonSelection.current = {
+          ...lastLessonSelection.current,
+          planItemId: String(data.teachingAction.metadata.plan_item_id),
+          conceptId: data.teachingAction.conceptId,
+        };
       }
       setTeachingAction(data.teachingAction);
       setAgentReplanned(replanned || data.replanned);
@@ -514,17 +501,42 @@ export function App() {
         gradingResult={agentGradingResult}
         replanned={agentReplanned}
         nextAction={nextAction}
-        hasMorePlannedLessons={hasMorePlannedLessons}
         recoveryLabel={nextAction === 'plan' ? 'Retry planning' : nextAction === 'complete' ? 'Return to plan' : 'Resume lesson'}
-        onRecover={() => nextAction === 'complete'
-          ? handleCloseAgentSession()
-          : handleStartAgentSession(nextAction === 'plan'
-            ? { entrySource: 'planned' }
-            : lastLessonSelection.current)}
+        onRecover={async () => {
+          if (nextAction === 'complete') {
+            await handleCloseAgentSession();
+            return;
+          }
+          if (nextAction === 'plan') {
+            await handleStartAgentSession({ entrySource: lastLessonSelection.current.entrySource });
+            return;
+          }
+          if (lastLessonSelection.current.entrySource === 'planned') {
+            const activePlan = learnerState?.activePlan;
+            const uncompleted = activePlan?.items.find((item) => !item.completed);
+            await handleStartAgentSession({
+              entrySource: 'planned',
+              conceptId: uncompleted?.conceptId,
+              planItemId: uncompleted ? String(uncompleted.id) : undefined,
+            });
+            return;
+          }
+          await handleStartAgentSession(lastLessonSelection.current);
+        }}
         onClose={handleCloseAgentSession}
-        onContinue={() => handleStartAgentSession()}
-        onSkipToNextLesson={handleSkipToNextLesson}
-        onRetryExercise={handleRetryExercise}
+        onContinue={async () => {
+          if (lastLessonSelection.current.entrySource === 'planned') {
+            const activePlan = learnerState?.activePlan;
+            const uncompleted = activePlan?.items.find((item) => !item.completed);
+            await handleStartAgentSession({
+              entrySource: 'planned',
+              conceptId: uncompleted?.conceptId,
+              planItemId: uncompleted ? String(uncompleted.id) : undefined,
+            });
+            return;
+          }
+          await handleStartAgentSession(lastLessonSelection.current);
+        }}
         onRequestHelp={handleTeachingHelp}
         onSubmitAnswer={handleAgentAnswer}
       />

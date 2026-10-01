@@ -21,11 +21,15 @@ _REDACTION_PATTERNS = [
 ]
 
 REDACTED_SUBSTITUTION = "***REDACTED***"
+_SECRET_HINTS = ("sk-", "bearer", "key", "token", "secret", "password", "auth")
 
 
 def scrub_sensitive_text(text: str) -> str:
     """Scrub known API keys, tokens, and authorization credentials from string text."""
     if not text:
+        return text
+    text_lower = text.lower()
+    if not any(hint in text_lower for hint in _SECRET_HINTS):
         return text
     scrubbed = text
     for pattern in _REDACTION_PATTERNS:

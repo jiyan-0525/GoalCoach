@@ -645,3 +645,39 @@ async def test_mcq_options_in_payload_and_1_click_grading(
     assert pass_res.grading_result.passed_gates is True
     assert pass_res.grading_result.scores.grammatical_correctness == 1.0
     assert pass_res.grading_result.scores.semantic_precision == 1.0
+
+
+# --- 11. Stale Plan Item ID Resilient Fallback Test ---
+
+
+@pytest.mark.asyncio
+async def test_stale_plan_item_id_fallback_to_uncompleted_item(
+    orchestrator: DeterministicOrchestrator,
+    temp_learner_repo: SqliteLearnerRepository,
+) -> None:
+    """When a client provides a stale plan_item_id (e.g. from an earlier plan before replanning),
+
+    the orchestrator falls back to the uncompleted item rather than raising SessionLifecycleError.
+    """
+    learner_id = f"stale_item_test_{uuid4().hex[:8]}"
+
+    await orchestrator.handle_event(
+        event_type=EventType.GOAL_CREATED,
+        learner_id=learner_id,
+        payload={"title": "HSK 1", "daily_available_minutes": 20},
+    )
+
+    # Pass a completely bogus / stale plan_item_id
+    res = await orchestrator.handle_event(
+        event_type=EventType.SESSION_STARTED,
+        learner_id=learner_id,
+        payload={
+            "entry_source": "planned",
+            "plan_item_id": "non-existent-uuid-12345",
+            "concept_id": "hsk1_c01",
+        },
+    )
+
+    # Must succeed cleanly by falling back to the uncompleted item
+    assert res.teaching_action is not None
+    assert res.teaching_action.concept_id == "hsk1_c01"
