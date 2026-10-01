@@ -449,6 +449,7 @@ export function App() {
               onStartStudy={(selection) => void handleStartAgentSession(selection)}
               onUpdateGoal={handleUpdateGoal}
               onRegeneratePlan={handleRegeneratePlan}
+              onOpenGoalSettings={() => setIsProfileDrawerOpen(true)}
             />
           )}
 

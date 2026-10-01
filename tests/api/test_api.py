@@ -242,6 +242,59 @@ async def test_help_event_rejects_unknown_curriculum_concept(client: AsyncClient
 
 
 @pytest.mark.asyncio
+async def test_help_event_with_learner_query_preserves_exercise_and_addresses_question(
+    client: AsyncClient,
+) -> None:
+    learner_id = f"api-help-{uuid4().hex}"
+    # Create goal first
+    await client.post(
+        "/api/v1/events",
+        json={
+            "event_type": "GOAL_CREATED",
+            "learner_id": learner_id,
+            "payload": {"title": "Travel in China", "daily_available_minutes": 20},
+        },
+    )
+    # Start session to get initial teaching action and exercise
+    session_res = await client.post(
+        "/api/v1/events",
+        json={
+            "event_type": "SESSION_STARTED",
+            "learner_id": learner_id,
+            "payload": {"concept_id": "hsk1_c01"},
+        },
+    )
+    assert session_res.status_code == 200
+    initial_exercise_id = session_res.json()["teachingAction"]["exercisePayload"]["exercise_id"]
+
+    # Request help with a specific query
+    help_query = "What is the difference between 你 and 您?"
+    help_res = await client.post(
+        "/api/v1/events",
+        json={
+            "event_type": "HELP_REQUESTED",
+            "learner_id": learner_id,
+            "payload": {
+                "concept_id": "hsk1_c01",
+                "current_exercise_id": initial_exercise_id,
+                "learner_query": help_query,
+            },
+        },
+    )
+    assert help_res.status_code == 200
+    data = help_res.json()
+    action = data["teachingAction"]
+    assert action is not None
+    # Exercise must be preserved
+    assert action["exercisePayload"]["exercise_id"] == initial_exercise_id
+    # Learner query must be recorded in metadata
+    assert action["metadata"]["learner_query"] == help_query
+    # Content must address the question
+    content = action["content"]
+    assert len(content) > 0
+
+
+@pytest.mark.asyncio
 async def test_replan_is_an_explicit_single_worker_event(client: AsyncClient) -> None:
     learner_id = f"api-replan-{uuid4().hex}"
     await client.post(

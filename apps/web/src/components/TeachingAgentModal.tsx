@@ -59,7 +59,7 @@ export const TeachingAgentModal: React.FC<TeachingAgentModalProps> = ({
   const [answer, setAnswer] = useState('');
   const [selectedLeft, setSelectedLeft] = useState<string | null>(null);
   const [matchedPairs, setMatchedPairs] = useState<Record<string, string>>({});
-  const [helpQuery, setHelpQuery] = useState('I do not understand this yet. Please explain it differently.');
+  const [helpQuery, setHelpQuery] = useState('');
 
   useEffect(() => {
     setAnswer('');
@@ -155,7 +155,18 @@ export const TeachingAgentModal: React.FC<TeachingAgentModalProps> = ({
             </div>
 
             <section className="rounded-3xl border border-indigo-100 bg-indigo-50/70 p-4 sm:p-5">
-              <h3 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-800"><Lightbulb className="h-4 w-4" />Coach’s explanation</h3>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-indigo-800">
+                  <Lightbulb className="h-4 w-4" />
+                  {action?.metadata?.learner_query ? "Coach's Clarification" : "Coach’s explanation"}
+                </h3>
+              </div>
+              {Boolean(action?.metadata?.learner_query) && (
+                <div className="mb-3 rounded-2xl border border-indigo-200/80 bg-white/90 p-3 text-xs text-indigo-950 shadow-sm">
+                  <span className="font-black uppercase tracking-wider text-indigo-700 mr-2">Your Question:</span>
+                  <p className="mt-1 font-medium italic text-slate-800">“{String(action?.metadata?.learner_query)}”</p>
+                </div>
+              )}
               <TeachingContent content={action.content} />
             </section>
             {action.pinyin && <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900"><span className="mr-2 text-xs uppercase tracking-wider">Say it</span>{action.pinyin}</p>}
@@ -341,9 +352,29 @@ export const TeachingAgentModal: React.FC<TeachingAgentModalProps> = ({
             )}
 
             <div className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-5">
-              <label htmlFor="coach-help" className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-zinc-600"><HelpCircle className="h-4 w-4" />Need a different explanation?</label>
-              <textarea id="coach-help" value={helpQuery} onChange={(event) => setHelpQuery(event.currentTarget.value)} className="mt-3 min-h-20 w-full rounded-xl border-2 border-zinc-200 p-3 text-sm outline-none focus:border-emerald-500" />
-              <button type="button" disabled={!helpQuery.trim() || loading} onClick={() => void onRequestHelp(helpQuery.trim())} className="mt-3 rounded-xl bg-zinc-900 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">Explain another way</button>
+              <label htmlFor="coach-help" className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-zinc-600">
+                <HelpCircle className="h-4 w-4" />
+                Need clarification or have a question?
+              </label>
+              <textarea
+                id="coach-help"
+                value={helpQuery}
+                onChange={(event) => setHelpQuery(event.currentTarget.value)}
+                placeholder="Ask what you didn't understand or need clarified (e.g. 'What is the difference between 你 and 您?')..."
+                className="mt-3 min-h-20 w-full rounded-xl border-2 border-zinc-200 p-3 text-sm outline-none focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  const q = helpQuery.trim() || 'Please explain this concept from another angle.';
+                  void onRequestHelp(q);
+                  setHelpQuery('');
+                }}
+                className="mt-3 rounded-xl bg-zinc-900 px-4 py-2.5 text-xs font-black text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
+              >
+                {helpQuery.trim() ? 'Ask Coach Baobao' : 'Explain another way'}
+              </button>
             </div>
           </div>
         )}

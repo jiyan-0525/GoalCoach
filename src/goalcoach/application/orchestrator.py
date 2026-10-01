@@ -81,6 +81,7 @@ class TeachingWorkerPort(Protocol):
         failed_attempts: int = 0,
         learner_query: str | None = None,
         excluded_exercise_id: str | None = None,
+        target_exercise_id: str | None = None,
     ) -> TeachingAction: ...
 
 
@@ -516,9 +517,10 @@ class DeterministicOrchestrator:
             concept_id=concept_id,
             state=state,
             content_service=self.content_service,
-            failed_attempts=1,
+            failed_attempts=1 if not learner_query else 0,
             learner_query=learner_query,
-            excluded_exercise_id=current_exercise_id,
+            target_exercise_id=current_exercise_id if learner_query else None,
+            excluded_exercise_id=current_exercise_id if not learner_query else None,
         )
         teaching_action.metadata.update(
             {
@@ -531,6 +533,8 @@ class DeterministicOrchestrator:
                 ),
             }
         )
+        if learner_query:
+            teaching_action.metadata["learner_query"] = learner_query
 
         if state.active_session is not None:
             state.active_session.pending_concept_id = teaching_action.concept_id

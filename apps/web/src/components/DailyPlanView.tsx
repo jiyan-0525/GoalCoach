@@ -16,6 +16,7 @@ interface DailyPlanViewProps {
   onStartStudy: (selection: LessonSelection) => void;
   onUpdateGoal: (goal: Partial<LearningGoal>) => void;
   onRegeneratePlan: () => void;
+  onOpenGoalSettings?: () => void;
 }
 
 const ITEM_STYLE = {
@@ -29,6 +30,7 @@ export const DailyPlanView: React.FC<DailyPlanViewProps> = ({
   concepts,
   onStartStudy,
   onRegeneratePlan,
+  onOpenGoalSettings,
 }) => {
   const completedCount = plan?.items.filter((item) => item.completed).length ?? 0;
   const currentItem = plan?.items.find((item) => !item.completed);
@@ -53,7 +55,13 @@ export const DailyPlanView: React.FC<DailyPlanViewProps> = ({
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-100 text-emerald-700"><Target className="h-8 w-8" /></div>
         <h2 className="mt-5 text-2xl font-extrabold">Ready to build your day?</h2>
         <p className="mt-2 text-sm text-slate-500">Your coach will turn your goal into a short, focused learning path.</p>
-        <button type="button" onClick={onRegeneratePlan} className="primary-action mt-6">Build today’s plan</button>
+        <button
+          type="button"
+          onClick={onOpenGoalSettings || onRegeneratePlan}
+          className="primary-action mt-6 cursor-pointer"
+        >
+          Build today’s plan
+        </button>
       </section>
     );
   }

@@ -48,9 +48,13 @@ class _TransientRetry:
         self.remaining = max_retries
 
     def should_retry(self, err: Exception) -> bool:
-        transient = isinstance(err, httpx.TransportError) or (
-            isinstance(err, ModelHTTPError)
-            and err.status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+        transient = (
+            isinstance(err, httpx.TransportError)
+            or (
+                isinstance(err, ModelHTTPError)
+                and err.status_code in {408, 409, 425, 429, 500, 502, 503, 504}
+            )
+            or isinstance(err, UnexpectedModelBehavior)
         )
         should_retry = transient and self.remaining > 0
         if should_retry:

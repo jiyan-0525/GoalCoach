@@ -76,11 +76,11 @@ Pedagogical Modality Rules:
    - Provide 1 natural example sentence tailored to the upcoming practice task and learner interests (e.g. food, travel, business).
    - Conclude with an encouraging prompt introducing the upcoming practice.
 
-2. First Confusion / Help Requested (failed_attempts == 1 or learner query):
-   - Choose `HINT` or `CONTRAST_EXAMPLE`.
-   - Validate the student's effort empathetically ("That was a great try!").
-   - Highlight the precise contrast (e.g., statement vs. question word order, or 吗 vs. 呢). Give an intuitive rule-of-thumb.
-   - Do NOT just repeat the earlier explanation.
+2. Help Requested / Clarification Query / Confusion:
+   - If the student asked a specific question or requested clarification (`learner_query`), your TOP PRIORITY is to directly, warmly, and accurately answer their question in `content`. Explain the nuance, character breakdown, pronunciation, or grammar rule they are confused about before connecting back to the practice.
+   - Choose `HINT`, `EXPLANATION`, or `CONTRAST_EXAMPLE` depending on what best clarifies their confusion.
+   - If no specific question was asked (general confusion or failed practice attempt), validate the student's effort empathetically, highlight the contrast, and give an intuitive rule-of-thumb.
+   - Do NOT just repeat the earlier explanation or give away the practice answer directly.
 
 3. Multiple Failures (failed_attempts >= 2):
    - Choose `RETRY` or `CONTRAST_EXAMPLE`.
@@ -164,6 +164,7 @@ class TeachingWorker:
         failed_attempts: int = 0,
         learner_query: str | None = None,
         excluded_exercise_id: str | None = None,
+        target_exercise_id: str | None = None,
     ) -> TeachingAction:
         """Invokes the Teaching Agent with deterministic heuristic fallback."""
         candidate_exercise = self._select_candidate_exercise(
@@ -172,6 +173,7 @@ class TeachingWorker:
             state=state,
             is_remedial=(failed_attempts > 0),
             excluded_exercise_id=excluded_exercise_id,
+            target_exercise_id=target_exercise_id,
         )
 
         deps = TeachingDeps(
@@ -219,6 +221,19 @@ class TeachingWorker:
 
         ex_type = getattr(candidate_exercise, "exercise_type", "mcq")
 
+        query_instruction = ""
+        if learner_query:
+            query_instruction = (
+                f'\nCRITICAL LEARNER QUESTION: The student specifically asks: "{learner_query}".\n'
+                "You MUST directly, warmly, and clearly answer this exact question first in your explanation before bridging back to the practice.\n"
+            )
+
+        length_constraint = (
+            "2. Keep it concise (under 100 words when answering a learner query or fresh explanation, under 45 words for quick hints/retries). Do NOT write long essays."
+            if learner_query
+            else "2. Keep it ultra-concise (under 60 words for fresh explanations, under 40 words for hints/retries). Do NOT write long essays."
+        )
+
         prompt = (
             f"Active Concept: {concept_id}\n"
             f"{concept_info}"
@@ -233,10 +248,11 @@ class TeachingWorker:
             f"Learner Query / Context: {learner_query or 'Normal lesson progression'}\n"
             f"Exercise to replace: {excluded_exercise_id or 'None'}\n"
             f"Recent Cross-Session Learning History:\n{history_summary}\n"
+            f"{query_instruction}"
             "Emit the optimal TeachingAction for this turn. Ground your explanation or guidance directly to help the student succeed on this upcoming practice task.\n"
             "CRITICAL:\n"
             "1. Write all explanations and conversational text in ENGLISH. Do not explain in Chinese.\n"
-            "2. Keep it ultra-concise (under 60 words for fresh explanations, under 40 words for hints/retries). Do NOT write long essays."
+            f"{length_constraint}"
         )
 
         try:
@@ -258,6 +274,8 @@ class TeachingWorker:
                     ),
                 }
             )
+            if learner_query:
+                action.metadata["learner_query"] = learner_query
             if action.concept_id == concept_id and action.content:
                 return self._attach_selected_exercise(action, candidate_exercise)
         except LLMUnavailableError as exc:
@@ -304,6 +322,7 @@ class TeachingWorker:
         state: LearnerState | None = None,
         is_remedial: bool = False,
         excluded_exercise_id: str | None = None,
+        target_exercise_id: str | None = None,
     ) -> Any:
         """Select the target exercise before agent invocation to ensure grounded teaching."""
         all_exercises = content_service.get_exercises_for_concept(
@@ -313,6 +332,11 @@ class TeachingWorker:
         )
         if not all_exercises:
             raise LookupError(f"No curriculum exercise found for concept {concept_id}")
+
+        if target_exercise_id:
+            for ex in all_exercises:
+                if str(ex.exercise_id) == str(target_exercise_id):
+                    return ex
 
         completed = set(state.today_completed_exercise_ids) if state else set()
         mistakes = set(state.today_mistake_exercise_ids) if state else set()
@@ -410,7 +434,25 @@ class TeachingWorker:
         example_pinyin = card.example_pinyin if card and card.example_pinyin else pinyin
         example_en = card.example_en if card and card.example_en else title_en
 
-        if failed_attempts == 0:
+        metadata: dict[str, Any] = {
+            "provider": "deterministic",
+            "fallback_used": True,
+            "notice": notice,
+        }
+        if learner_query:
+            metadata["learner_query"] = learner_query
+
+        if learner_query:
+            content = (
+                f'You asked: *"{learner_query}"*\n\n'
+                f"Here is a key clarification on **{title_zh}** ({title_en}):\n\n"
+                f"• Focus item: **{example_zh}** ({example_pinyin}) — {example_en}\n"
+                f"• Coach tip: In Chinese sentence structure, pay close attention to the meaning of individual characters and word order.\n\n"
+                f"Keep this rule in mind as you try the practice task below!"
+            )
+            action_kind = TeachingActionKind.HINT
+            strategy = f"a targeted clarification for '{learner_query}'"
+        elif failed_attempts == 0:
             is_matching = getattr(candidate_exercise, "exercise_type", "") == "matching"
             if is_matching:
                 content = (
@@ -455,11 +497,7 @@ class TeachingWorker:
             content=content,
             history_summary=f"Taught {title_en} using {strategy} for the learner goal.",
             pinyin=example_pinyin,
-            metadata={
-                "provider": "deterministic",
-                "fallback_used": True,
-                "notice": notice,
-            },
+            metadata=metadata,
         )
 
 
