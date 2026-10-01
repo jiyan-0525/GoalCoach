@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from datetime import timedelta
-from datetime import UTC, datetime
 from uuid import UUID
-from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy import exists, func, select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from goalcoach.domain.models import LearnerState, LearningEvent
 from goalcoach.infrastructure.persistence.learner_models import (
     LearnerStateORM,
     LearningEventORM,
-    UserAccountORM,
 )
 from goalcoach.infrastructure.persistence.models import (
     ConceptPrerequisite,
@@ -35,23 +31,6 @@ class LearnerRepositoryError(RuntimeError):
 
 class StaleLearnerStateError(LearnerRepositoryError):
     """Raised when a saved aggregate no longer matches the loaded optimistic version."""
-
-
-@dataclass(frozen=True)
-class UserAccount:
-    id: str
-    email: str
-    display_name: str
-    learner_id: str
-    created_at: datetime
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
-class UserAuthRecord:
-    account: UserAccount
-    password_hash: str
-    password_salt: str
 
 
 class ContentRepository:
@@ -192,31 +171,6 @@ class SqlAlchemyLearnerRepository:
     ) -> list[LearningEvent]:
         """Fetch chronological learning events for a learner."""
         return await asyncio.to_thread(self._get_learning_events_sync, learner_id, limit)
-
-    async def get_user_by_email(self, email: str) -> UserAccount | None:
-        return await asyncio.to_thread(self._get_user_by_email_sync, email)
-
-    async def get_user_by_id(self, user_id: str) -> UserAccount | None:
-        return await asyncio.to_thread(self._get_user_by_id_sync, user_id)
-
-    async def get_user_auth_record_by_email(self, email: str) -> UserAuthRecord | None:
-        return await asyncio.to_thread(self._get_user_auth_record_by_email_sync, email)
-
-    async def create_user(
-        self,
-        *,
-        email: str,
-        display_name: str,
-        password_hash: str,
-        password_salt: str,
-    ) -> UserAccount:
-        return await asyncio.to_thread(
-            self._create_user_sync,
-            email,
-            display_name,
-            password_hash,
-            password_salt,
-        )
 
     def _get_sync(self, learner_id: UUID | str) -> LearnerState | None:
         try:
@@ -384,96 +338,6 @@ class SqlAlchemyLearnerRepository:
                 "Failed to load learning events", extra={"learner_id": str(learner_id)}
             )
             raise LearnerRepositoryError(f"Failed to load events for {learner_id}") from exc
-
-    def _get_user_by_email_sync(self, email: str) -> UserAccount | None:
-        normalized_email = email.strip().lower()
-        if not normalized_email:
-            return None
-        statement = select(UserAccountORM).where(UserAccountORM.email == normalized_email).limit(1)
-        try:
-            with self._session_factory() as session:
-                record = session.scalars(statement).first()
-                return self._to_user_account(record) if record else None
-        except SQLAlchemyError as exc:
-            logger.exception("Failed to load user by email", extra={"email": normalized_email})
-            raise LearnerRepositoryError("Failed to load user account") from exc
-
-    def _get_user_by_id_sync(self, user_id: str) -> UserAccount | None:
-        clean_id = user_id.strip()
-        if not clean_id:
-            return None
-        try:
-            with self._session_factory() as session:
-                record = session.get(UserAccountORM, clean_id)
-                return self._to_user_account(record) if record else None
-        except SQLAlchemyError as exc:
-            logger.exception("Failed to load user by id", extra={"user_id": clean_id})
-            raise LearnerRepositoryError("Failed to load user account") from exc
-
-    def _get_user_auth_record_by_email_sync(self, email: str) -> UserAuthRecord | None:
-        normalized_email = email.strip().lower()
-        if not normalized_email:
-            return None
-        statement = select(UserAccountORM).where(UserAccountORM.email == normalized_email).limit(1)
-        try:
-            with self._session_factory() as session:
-                record = session.scalars(statement).first()
-                if record is None:
-                    return None
-                return UserAuthRecord(
-                    account=self._to_user_account(record),
-                    password_hash=record.password_hash,
-                    password_salt=record.password_salt,
-                )
-        except SQLAlchemyError as exc:
-            logger.exception(
-                "Failed to load user auth record",
-                extra={"email": normalized_email},
-            )
-            raise LearnerRepositoryError("Failed to load user account") from exc
-
-    def _create_user_sync(
-        self,
-        email: str,
-        display_name: str,
-        password_hash: str,
-        password_salt: str,
-    ) -> UserAccount:
-        normalized_email = email.strip().lower()
-        name = display_name.strip() or "Learner"
-        if not normalized_email:
-            raise LearnerRepositoryError("Email is required")
-        now = datetime.now(UTC)
-        user = UserAccountORM(
-            id=str(uuid4()),
-            email=normalized_email,
-            display_name=name,
-            password_hash=password_hash,
-            password_salt=password_salt,
-            learner_id=f"learner_{uuid4()}",
-            created_at=now,
-            updated_at=now,
-        )
-        try:
-            with self._session_factory.begin() as session:
-                session.add(user)
-        except IntegrityError as exc:
-            raise LearnerRepositoryError("An account with this email already exists") from exc
-        except SQLAlchemyError as exc:
-            logger.exception("Failed to create user", extra={"email": normalized_email})
-            raise LearnerRepositoryError("Failed to create user account") from exc
-        return self._to_user_account(user)
-
-    @staticmethod
-    def _to_user_account(record: UserAccountORM) -> UserAccount:
-        return UserAccount(
-            id=record.id,
-            email=record.email,
-            display_name=record.display_name,
-            learner_id=record.learner_id,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-        )
 
 
 SqliteLearnerRepository = SqlAlchemyLearnerRepository

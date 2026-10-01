@@ -11,7 +11,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from apps.api.dependencies import get_content_repo, get_learner_repo, resolve_learner_id
+from apps.api.dependencies import get_content_repo, get_learner_repo
 from goalcoach.application.orchestrator import derive_next_action
 from goalcoach.application.progress_reducer import compute_progress_summary
 from goalcoach.domain.models import (
@@ -182,12 +182,11 @@ async def text_to_speech(text: str = Query(..., min_length=1)) -> Response:
 @router.get("/api/v1/learners/{learner_id}")
 async def get_learner_aggregate(
     learner_id: str,
-    resolved_learner_id: str = Depends(resolve_learner_id),
     learner_repo: SqliteLearnerRepository = Depends(get_learner_repo),
     content_repo: ContentRepository = Depends(get_content_repo),
 ) -> dict[str, Any]:
     """Fetch the authoritative learner state and its progress projection."""
-    state = await get_or_create_learner(resolved_learner_id, learner_repo)
+    state = await get_or_create_learner(learner_id, learner_repo)
     concepts = content_repo.list_concepts()
     summary = compute_progress_summary(state, concepts)
     return {
@@ -201,11 +200,10 @@ async def get_learner_aggregate(
 @router.get("/api/v1/learners/{learner_id}/today-plan")
 async def get_today_plan(
     learner_id: str,
-    resolved_learner_id: str = Depends(resolve_learner_id),
     learner_repo: SqliteLearnerRepository = Depends(get_learner_repo),
 ) -> Any:
     """Return the persisted Agent-generated daily plan without mutating state."""
-    state = await get_or_create_learner(resolved_learner_id, learner_repo)
+    state = await get_or_create_learner(learner_id, learner_repo)
     if state.active_plan is None:
         raise HTTPException(
             status_code=404,
@@ -217,12 +215,11 @@ async def get_today_plan(
 @router.get("/api/v1/learners/{learner_id}/roadmap")
 async def get_learner_roadmap(
     learner_id: str,
-    resolved_learner_id: str = Depends(resolve_learner_id),
     learner_repo: SqliteLearnerRepository = Depends(get_learner_repo),
     content_repo: ContentRepository = Depends(get_content_repo),
 ) -> dict[str, Any]:
     """Return the learner-specific roadmap and today's plan from one state snapshot."""
-    state = await get_or_create_learner(resolved_learner_id, learner_repo)
+    state = await get_or_create_learner(learner_id, learner_repo)
     concepts = content_repo.list_concepts()
     return {
         "stateVersion": state.state_version,

@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from apps.api.middleware.observability import ObservabilityMiddleware
-from apps.api.routes.auth import router as auth_router
 from apps.api.routes.learning import router as learning_router
 from apps.api.routes.learning_loop import router as learning_loop_router
 from goalcoach.infrastructure.config import Settings
@@ -84,7 +83,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Routers
     application.include_router(learning_router)
     application.include_router(learning_loop_router)
-    application.include_router(auth_router)
 
     # Health check
     @application.get("/health")

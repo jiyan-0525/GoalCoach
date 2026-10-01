@@ -32,10 +32,6 @@ class Settings(BaseSettings):
     fallback_llm_model: str | None = None
     enable_ollama_fallback: bool = False
 
-    auth_secret_key: str = "goalcoach-dev-insecure-secret"
-    auth_token_expiry_minutes: int = Field(default=60 * 24 * 7, ge=5, le=60 * 24 * 30)
-    auth_require_token: bool = False
-
     log_level: str = "INFO"
     log_format: str = "auto"
     log_to_file: bool = True
